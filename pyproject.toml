@@ -1,0 +1,7 @@
+[project]
+name = "emotion-detection"
+version = "1.0.0"
+description = "Facial detection with emotion recognition on limited training data"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = []
