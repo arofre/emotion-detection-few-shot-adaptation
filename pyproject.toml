@@ -3,5 +3,8 @@ name = "emotion-detection"
 version = "1.0.0"
 description = "Facial detection with emotion recognition on limited training data"
 readme = "README.md"
-requires-python = ">=3.12"
-dependencies = []
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "facenet-pytorch>=2.6.0",
+    "matplotlib>=3.11.2",
+]
