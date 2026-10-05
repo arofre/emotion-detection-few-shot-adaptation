@@ -48,24 +48,25 @@ def run_webcam(detector, device):
                 time.sleep(0.01)
                 continue
 
-            boxes = []
+            face_images = []
             start_time = time.time()
             detected_boxes, _ = detector.detect(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)) 
             for box in detected_boxes if detected_boxes is not None else []: 
-                #Här kan vi överväga att köra batch
                 x1, y1, x2, y2 = box
-                face_image = frame[int(y1):int(y2), int(x1):int(x2)]
-                emotion = classify_face(face_image, device)
-                boxes.append((x1, y1, x2, y2, emotion))
+                face_images.append(frame[int(y1):int(y2), int(x1):int(x2)])
 
+            emotions = classify_face(face_images, device)
+            
+            classified_boxes = [(*box, emotion) for box, emotion in zip(detected_boxes, emotions)]
                 
             latest_time = time.time() - start_time
             with lock:
                 state["latest_time"] = latest_time
-                state["boxes"] = boxes
+                state["boxes"] = classified_boxes
 
     thread = threading.Thread(target=worker, daemon=True)
-    thread.start()
+    thread.start() #Jag ska vara helt ärlig och säga att jag inte riktigt vet
+                   #hur threading fungerar
 
     while True:
         ok, frame = cap.read()

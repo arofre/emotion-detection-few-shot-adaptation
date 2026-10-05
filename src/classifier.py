@@ -1,2 +1,5 @@
-def classify_face(image, device):
-    return "happy"
+import torch
+
+def classify_face(images, device):
+    return ["glad tror jag" for i in range(len(images))]
+
