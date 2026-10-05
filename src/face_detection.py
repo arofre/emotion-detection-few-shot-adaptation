@@ -12,6 +12,8 @@ from collections import Counter, deque
 from classifier import classify_face
 
 
+COLOR = (60, 60, 220)
+
 def show_image(path, detector, device):
     image = Image.open(path).convert("RGB")
 
@@ -49,15 +51,17 @@ def run_webcam(detector, device):
                 continue
 
             face_images = []
+            classified_boxes = []
             start_time = time.time()
-            detected_boxes, _ = detector.detect(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)) 
+            detected_boxes, probabilities = detector.detect(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)) 
             for box in detected_boxes if detected_boxes is not None else []: 
                 x1, y1, x2, y2 = box
                 face_images.append(frame[int(y1):int(y2), int(x1):int(x2)])
 
-            emotions = classify_face(face_images, device)
-            
-            classified_boxes = [(*box, emotion) for box, emotion in zip(detected_boxes, emotions)]
+            if face_images:
+                emotions = classify_face(face_images, device)
+                classified_boxes = [(*box, emotion, probability) for box, emotion, probability in 
+                        zip(detected_boxes, emotions, probabilities)]
                 
             latest_time = time.time() - start_time
             with lock:
@@ -83,17 +87,17 @@ def run_webcam(detector, device):
                 smooth = [list(b[:4]) for b in boxes]
                 history = [deque(maxlen=30) for _ in boxes]
 
-            for i, (x1, y1, x2, y2, emotion) in enumerate(boxes):
+            for i, (x1, y1, x2, y2, emotion, probability) in enumerate(boxes):
                 smooth[i] = [s + smoothing_factor * (n - s) for s, n in zip(smooth[i], (x1, y1, x2, y2))]
                 history[i].append(emotion)
 
-                label = Counter(history[i]).most_common(1)[0][0]
+                label = f'{Counter(history[i]).most_common(1)[0][0]} {probability:.3f}'
                 sx1, sy1, sx2, sy2 = map(int, smooth[i])
-                cv2.rectangle(frame, (sx1, sy1), (sx2, sy2), (0, 255, 0), 2)
+                cv2.rectangle(frame, (sx1, sy1), (sx2, sy2), COLOR, 2)
                 cv2.putText(frame, label, (sx1, sy1 - 10),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.9, COLOR, 2)
                 
-        cv2.putText(frame, f'{latest_time:.2f}s', (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+        cv2.putText(frame, f'{latest_time * 1000:.0f}ms', (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, COLOR, 2)
 
         cv2.imshow("Camera", frame)
         if cv2.waitKey(1) & 0xFF == ord("q"):
@@ -108,5 +112,5 @@ def run_webcam(detector, device):
 if __name__ == "__main__":
     device = "cuda" if torch.cuda.is_available() else "cpu"
     detector = MTCNN(keep_all=True, device=device)
-    # show_image("src/photo.jpg", detector)
+    show_image("src/photo.jpg", detector, device)
     run_webcam(detector, device)
