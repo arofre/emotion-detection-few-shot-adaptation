@@ -8,7 +8,7 @@ from facenet_pytorch import MTCNN
 from PIL import Image
 import torch
 from collections import Counter, deque
-from torchvision.models import resnet18, ResNet18_Weights
+from torchvision.models import ResNet50_Weights, resnet18, ResNet18_Weights, resnet50
 from torch import nn
 
 from classifier import classify_face
@@ -145,18 +145,19 @@ if __name__ == "__main__":
     device = "cuda" if torch.cuda.is_available() else "cpu"
     detector = MTCNN(keep_all=True, device=device)
     #show_image("src/photo.jpg", detector, device)
-    weights = ResNet18_Weights.DEFAULT
+    weights = ResNet50_Weights.IMAGENET1K_V2
 
-    model = resnet18(weights=weights)
+    #weights = ViT_B_16_Weights.DEFAULT
+    model = resnet50(weights=weights)
     preprocess = weights.transforms()
 
     model.fc = nn.Sequential(
-        nn.Dropout(p=0.3),
+        nn.Dropout(p=0.4),
         nn.Linear(model.fc.in_features, 8)
     )
 
     checkpoint = torch.load(
-        "checkpoints/best_emotion_resnet.pth",
+        "checkpoints/best_resnet.pth",
         map_location=device
     )
 

@@ -1,6 +1,6 @@
 import torch
 from torch import nn
-from torchvision.models import resnet18, ResNet18_Weights, EfficientNet_V2_S_Weights, efficientnet_v2_s
+from torchvision.models import ResNet50_Weights, resnet18, ResNet18_Weights, EfficientNet_V2_S_Weights, efficientnet_v2_s, resnet50, vit_b_16, ViT_B_16_Weights
 
 import matplotlib.pyplot as plt
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, classification_report
@@ -39,6 +39,8 @@ def evaluate_model(model, dataloader, device="cpu", loss_fn=None):
     predictions, targets = [], []
     model.eval()
 
+    
+
     try:
         with torch.inference_mode():
             for images, labels in dataloader:
@@ -46,6 +48,7 @@ def evaluate_model(model, dataloader, device="cpu", loss_fn=None):
                 outputs = model(images)
 
                 predicted = torch.argmax(outputs, dim=1)
+
                 target_indices = torch.argmax(labels, dim=1)
 
                 batch_size = labels.size(0)
@@ -81,17 +84,24 @@ if __name__ == "__main__":
     from preprocessing import build_image_transform
     from data_loader import FerDataset
 
-    weights = ResNet18_Weights.DEFAULT
+    weights = ResNet50_Weights.IMAGENET1K_V2
 
-    model = resnet18(weights=weights)
+    #weights = ViT_B_16_Weights.DEFAULT
+    model = resnet50(weights=weights)
+    #model = vit_b_16(weights=weights)
     num_classes = 8
     model.fc = nn.Sequential(
         nn.Dropout(p=0.4),
         nn.Linear(model.fc.in_features, num_classes)
     )
+    #model.heads.head = nn.Sequential(
+    #    nn.Dropout(p=0.4),
+    #    nn.Linear(model.heads.head.in_features, num_classes)
+    #)
+
 
     checkpoint = torch.load(
-            f"checkpoints/best_emotion_{model.__class__.__name__.lower()}.pth",
+            f"checkpoints/best_{model.__class__.__name__.lower()}.pth",
             map_location=device,
             weights_only=True
 
@@ -118,11 +128,8 @@ if __name__ == "__main__":
     results = evaluate_model(model, test_loader, device=device)
     print(f"Test Accuracy: {results['accuracy']:.4f}")
 
-    results = evaluate_model(model, test_loader, device=device)
-    print(f"Test Accuracy: {results['accuracy']:.4f}")
-
     class_names = [
         "neutral", "happiness", "surprise", "sadness", "anger",
-        "disgust", "fear", "contempt", "unknown", "NF",
+        "disgust", "fear", "contempt",
     ]
     plot_confusion_matrix(results["targets"], results["predictions"], class_names)

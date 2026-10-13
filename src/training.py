@@ -1,6 +1,7 @@
 from torch import nn, cuda, optim
 import torch
-from torchvision.models import resnet18, ResNet18_Weights, EfficientNet_V2_S_Weights, efficientnet_v2_s
+from torchvision.models import resnet50, ResNet50_Weights, EfficientNet_V2_S_Weights, efficientnet_v2_s, vit_b_16, ViT_B_16_Weights
+
 from torchvision import transforms
 from torch.utils.data import DataLoader
 
@@ -31,13 +32,14 @@ def training_loop(model, optimizer, train_criterion, val_criterion, train_loader
             image_batch = image_batch.to(device)
             label_batch = label_batch.to(device)
 
-            optimizer.zero_grad()
+            optimizer.zero_grad(set_to_none=True)
 
-            output_batch = model(image_batch)
+            with torch.autocast(device_type=device, dtype=torch.float16, enabled=(device == "cuda")):
+                output_batch = model(image_batch)
 
-            log_probs = torch.log_softmax(output_batch, dim=1)
+                log_probs = torch.log_softmax(output_batch, dim=1)
 
-            loss = train_criterion(log_probs, label_batch)
+                loss = train_criterion(log_probs, label_batch)
 
             loss.backward()
             optimizer.step()
@@ -99,25 +101,54 @@ def training_loop(model, optimizer, train_criterion, val_criterion, train_loader
             }, f"checkpoints/best_{model.__class__.__name__.lower()}.pth")
 
 
+def set_trainable_layers(model, trainable_layers):
+    for param in model.parameters():
+        param.requires_grad = False
+
+    for layer_name in trainable_layers:
+        layer = getattr(model, layer_name)
+        for param in layer.parameters():
+            param.requires_grad = True
+
+
+def make_optimizer(model, layer_lrs, weight_decay=1e-4):
+    return torch.optim.AdamW(
+        [
+            {
+                "params": getattr(model, layer_name).parameters(),
+                "lr": lr,
+            }
+            for layer_name, lr in layer_lrs.items()
+        ],
+        weight_decay=weight_decay,
+    )
+
 device = "cuda" if cuda.is_available() else "cpu"
 print(device)
 
-weights = ResNet18_Weights.DEFAULT
+weights = ResNet50_Weights.IMAGENET1K_V2
 
-model = resnet18(weights=weights)
+model = resnet50(weights=weights)
 
 num_classes = 8
 
-''' #classifier istället för fc för vissa modeller
-model.classifier = nn.Sequential(
-    nn.Dropout(p=0.3),
-    nn.Linear(model.classifier[1].in_features, num_classes)
-)
-'''
 model.fc = nn.Sequential(
     nn.Dropout(p=0.4),
     nn.Linear(model.fc.in_features, num_classes)
 )
+
+'''
+model.classifier = nn.Sequential(
+    nn.Dropout(p=0.4),
+    nn.Linear(model.classifier[1].in_features, num_classes)
+)
+
+
+model.heads.head = nn.Sequential(
+    nn.Dropout(p=0.4),
+    nn.Linear(model.heads.head.in_features, num_classes)
+)
+''' #classifier istället för fc för vissa modeller
 
 model = model.to(device)
 
@@ -142,8 +173,6 @@ val_dataset = FerDataset(
     "data/valid/",
     build_image_transform(size=size, channels=3, augment=False, mean=weights.transforms().mean, std=weights.transforms().std),
 )
-
-
 batch_size = 32
 
 train_loader = DataLoader(
@@ -167,28 +196,57 @@ w = w / (w * prior).sum()
 train_criterion = WeightedKLDiv(w.to(device))
 val_criterion = nn.KLDivLoss(reduction="batchmean")
 
-#Only train on classifier
-for param in model.parameters():
-    param.requires_grad = False
+set_trainable_layers(model, ["fc"])
 
-for param in model.fc.parameters():
-    param.requires_grad = True
+optimizer = make_optimizer(
+    model,
+    {
+        "fc": 1e-3,
+    },
+)
 
+training_loop(
+    model, optimizer,
+    train_criterion, val_criterion,
+    train_loader, val_loader,
+    epochs=4,
+)
 
-optimizer = torch.optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=1e-4, weight_decay=1e-4)
-training_loop(model, optimizer, train_criterion, val_criterion, train_loader, val_loader, epochs = 5)
+set_trainable_layers(model, ["layer4", "fc"])
 
+optimizer = make_optimizer(
+    model,
+    {
+        "layer4": 1e-4,
+        "fc": 5e-4,
+    },
+)
 
-for param in model.layer4.parameters():
-    param.requires_grad = True
+training_loop(
+    model, optimizer,
+    train_criterion, val_criterion,
+    train_loader, val_loader,
+    epochs=6,
+)
 
-optimizer = torch.optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=5e-5, weight_decay=1e-4)
-training_loop(model, optimizer, train_criterion, val_criterion, train_loader, val_loader, epochs = 8)
+set_trainable_layers(model, ["conv1", "bn1", "layer1", "layer2", "layer3", "layer4", "fc"])
 
+optimizer = make_optimizer(
+    model,
+    {
+        "conv1": 1e-6,
+        "bn1": 1e-6,
+        "layer1":1e-6,
+        "layer2": 2e-6,
+        "layer3": 5e-6,
+        "layer4": 1e-5,
+        "fc": 5e-5,
+    },
+)
 
-#Train on all layers lower lr
-for param in model.parameters():
-    param.requires_grad = True
-
-optimizer = torch.optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=1e-5, weight_decay=1e-4)
-training_loop(model, optimizer, train_criterion, val_criterion, train_loader, val_loader, epochs = 5)
+training_loop(
+    model, optimizer,
+    train_criterion, val_criterion,
+    train_loader, val_loader,
+    epochs=8,
+)
