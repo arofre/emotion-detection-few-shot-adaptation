@@ -8,6 +8,8 @@ from facenet_pytorch import MTCNN
 from PIL import Image
 import torch
 from collections import Counter, deque
+from torchvision.models import resnet18, ResNet18_Weights
+from torch import nn
 
 from classifier import classify_face
 
@@ -32,7 +34,8 @@ def show_image(path, detector, device):
     plt.show()
 
 
-def run_webcam(detector, device):
+
+def run_webcam(detector, model, preprocess, device):
     smoothing_factor = 0.5 #mellan 0 och 1
     smooth = []   
     history = [] 
@@ -51,17 +54,46 @@ def run_webcam(detector, device):
                 continue
 
             face_images = []
+            valid_boxes = []
+
+            h, w = frame.shape[:2]
+
+
             classified_boxes = []
             start_time = time.time()
             detected_boxes, probabilities = detector.detect(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)) 
             for box in detected_boxes if detected_boxes is not None else []: 
                 x1, y1, x2, y2 = box
-                face_images.append(frame[int(y1):int(y2), int(x1):int(x2)])
+
+                x1 = int(max(0, min(x1, w - 1)))
+                x2 = int(max(0, min(x2, w)))
+                y1 = int(max(0, min(y1, h - 1)))
+                y2 = int(max(0, min(y2, h)))
+
+                if x2 <= x1 or y2 <= y1:
+                    continue
+
+                face = frame[y1:y2, x1:x2]
+
+                if face.size == 0:
+                    continue
+
+                face_images.append(face)
+                #Ganska ful lösing för att fixa när ett ansikte är i kanten av bilden
+                valid_boxes.append((x1, y1, x2, y2))
+
 
             if face_images:
-                emotions = classify_face(face_images, device)
-                classified_boxes = [(*box, emotion, probability) for box, emotion, probability in 
-                        zip(detected_boxes, emotions, probabilities)]
+                emotions, emotion_probabilities = classify_face(face_images, model, preprocess, device)
+
+                classified_boxes = [
+                    (*box, emotion, probability)
+                    for box, emotion, probability in zip(
+                        valid_boxes,
+                        emotions,
+                        emotion_probabilities.max(axis=1)
+                    )
+                ]
                 
             latest_time = time.time() - start_time
             with lock:
@@ -112,5 +144,27 @@ def run_webcam(detector, device):
 if __name__ == "__main__":
     device = "cuda" if torch.cuda.is_available() else "cpu"
     detector = MTCNN(keep_all=True, device=device)
-    show_image("src/photo.jpg", detector, device)
-    run_webcam(detector, device)
+    #show_image("src/photo.jpg", detector, device)
+    weights = ResNet18_Weights.DEFAULT
+
+    model = resnet18(weights=weights)
+    preprocess = weights.transforms()
+
+    model.fc = nn.Sequential(
+        nn.Dropout(p=0.3),
+        nn.Linear(model.fc.in_features, 10)
+    )
+
+    checkpoint = torch.load(
+        "checkpoints/best_emotion_resnet18.pth",
+        map_location=device
+    )
+
+    model.load_state_dict(checkpoint["model_state_dict"])
+
+    model = model.to(device)
+    model.eval()
+
+
+
+    run_webcam(detector, model, preprocess, device)

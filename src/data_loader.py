@@ -21,9 +21,10 @@ class FerDataset(Dataset):
         
         img = Image.open(path)
 
+        img = img.convert("RGB") if img.mode != "RGB" else img
         if self.transform:
             img = self.transform(img)
-        
+
         return img, label
 
     def __len__(self):
@@ -35,7 +36,8 @@ class FerDataset(Dataset):
         data = pd.read_csv(label_path, names=['Image name','Box'] + CLASSES)
         
         samples = data["Image name"].values
-        labels = data[CLASSES].to_numpy()
+        labels = data[CLASSES].to_numpy(dtype=float)
+        labels = labels / labels.sum(axis=1, keepdims=True)
 
         return samples, labels
 
