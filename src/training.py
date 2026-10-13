@@ -121,14 +121,16 @@ if False:
     model.load_state_dict(checkpoint["model_state_dict"])
 
 
+size = 112
+
 train_dataset = FerDataset(
     "data/train/",
-    build_image_transform(size=224, channels=3, augment=True, mean=weights.transforms().mean, std=weights.transforms().std),
+    build_image_transform(size=size, channels=3, augment=True, mean=weights.transforms().mean, std=weights.transforms().std),
 )
 
 val_dataset = FerDataset(
     "data/valid/",
-    build_image_transform(size=224, channels=3, augment=False, mean=weights.transforms().mean, std=weights.transforms().std),
+    build_image_transform(size=size, channels=3, augment=False, mean=weights.transforms().mean, std=weights.transforms().std),
 )
 
 
@@ -146,7 +148,6 @@ val_loader = DataLoader(
     shuffle=False
 )
 
-optimizer = torch.optim.AdamW(list(model.parameters()), lr=1e-4, weight_decay=1e-4)
 
 criterion = nn.KLDivLoss(reduction="batchmean")
 
@@ -158,23 +159,20 @@ for param in model.fc.parameters():
     param.requires_grad = True
 
 
-training_loop(model, optimizer, criterion, train_loader, val_loader, epochs = 3)
+optimizer = torch.optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=1e-4, weight_decay=1e-4)
+training_loop(model, optimizer, criterion, train_loader, val_loader, epochs = 5)
+
 
 for param in model.layer4.parameters():
     param.requires_grad = True
 
-training_loop(
-    model,
-    optimizer,
-    criterion,
-    train_loader,
-    val_loader,
-    epochs = 8
-)
-optimizer = torch.optim.AdamW(list(model.parameters()), lr=1e-5, weight_decay=1e-4)
+optimizer = torch.optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=5e-5, weight_decay=1e-4)
+training_loop(model, optimizer, criterion, train_loader, val_loader, epochs = 8)
+
 
 #Train on all layers lower lr
 for param in model.parameters():
     param.requires_grad = True
 
-training_loop(model, optimizer, criterion, train_loader, val_loader, epochs = 10)
+optimizer = torch.optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=1e-5, weight_decay=1e-4)
+training_loop(model, optimizer, criterion, train_loader, val_loader, epochs = 5)

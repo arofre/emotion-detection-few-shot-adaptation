@@ -7,9 +7,6 @@ Source: SSY340-group-92/HA3/HA3.ipynb.
 Cells 30, 41 and 92 (counted from 1, including Markdown):
 Compose/ToTensor, separate training and validation transforms, Resize,
 Normalize, and training augmentation.
-
-FER+ adaptations: default to 48x48 grayscale, make normalization optional,
-and disable augmentation by default. Label processing is not included.
 """
 
 from torchvision import transforms as T
@@ -34,9 +31,9 @@ def build_image_transform(size=224, channels=1, mean=None, std=None, augment=Fal
     ]
     if augment:
         steps.append(T.RandomHorizontalFlip())
-        steps.append(T.RandomRotation(degrees=10))
+        steps.append(T.RandomRotation(degrees=7))
         steps.append(T.RandomResizedCrop(
-            size=224,
+            size=size,
             scale=(0.9, 1.0),
             ratio=(0.95, 1.05)
         ))
