@@ -31,11 +31,16 @@ def evaluate_model(model, dataloader, device="cpu", loss_fn=None):
                 images, labels = images.to(device), labels.to(device)
                 outputs = model(images)
 
-                predicted = outputs.argmax(dim=1)
+                predicted = torch.argmax(outputs, dim=1)
                 target_indices = torch.argmax(labels, dim=1)
 
-                batch_size = labels.numel()
+                batch_size = labels.size(0)
+
                 correct += (predicted == target_indices).sum().item()
+                #print("Images:", images.shape)
+                #print("Labels:", labels.shape, labels.dtype)
+                #print("Labels sample:", labels[:5])
+                #print("Outputs:", outputs.shape)
                 total += batch_size
                 predictions.append(predicted.cpu())
                 targets.append(target_indices.cpu())
@@ -63,7 +68,6 @@ if __name__ == "__main__":
     from data_loader import FerDataset
 
     weights = ResNet18_Weights.DEFAULT
-    preprocess = weights.transforms()
 
     model = resnet18(weights=weights)
     num_classes = 10
@@ -73,8 +77,10 @@ if __name__ == "__main__":
     )
 
     checkpoint = torch.load(
-            "checkpoints/intermediate_resnet18.pth",
-            map_location=device
+            f"checkpoints/best_emotion_{model.__class__.__name__.lower()}.pth",
+            map_location=device,
+            weights_only=True
+
         )
     model.load_state_dict(checkpoint["model_state_dict"])
     model.to(device)
@@ -82,8 +88,9 @@ if __name__ == "__main__":
     test_dataset = FerDataset(
         root="data/test/",
         transform=build_image_transform(
-            size=224,
+            size=112,
             channels=3,
+            augment=False,
             mean=weights.transforms().mean,
             std=weights.transforms().std,
         )

@@ -156,7 +156,7 @@ if __name__ == "__main__":
     )
 
     checkpoint = torch.load(
-        "checkpoints/best_emotion_resnet18.pth",
+        "checkpoints/best_emotion_resnet.pth",
         map_location=device
     )
 

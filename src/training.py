@@ -45,7 +45,7 @@ def training_loop(model, optimizer, criterion, train_loader, val_loader, epochs)
                     "model_state_dict": model.state_dict(),
                     "optimizer_state_dict": optimizer.state_dict(),
                     "train_loss": train_loss,
-                }, "checkpoints/intermediate_resnet18.pth")
+                }, f"checkpoints/intermediate_{model.__class__.__name__.lower()}.pth")
 
         train_loss /= len(train_loader.dataset)
 
@@ -86,7 +86,7 @@ def training_loop(model, optimizer, criterion, train_loader, val_loader, epochs)
                 "model_state_dict": model.state_dict(),
                 "optimizer_state_dict": optimizer.state_dict(),
                 "val_loss": val_loss,
-            }, "checkpoints/best_emotion_resnet18.pth")
+            }, f"checkpoints/best_{model.__class__.__name__.lower()}.pth")
 
 
 device = "cuda" if cuda.is_available() else "cpu"
@@ -114,7 +114,7 @@ model = model.to(device)
 #Used to load a previously trained model and continue training it
 if False:
     checkpoint = torch.load(
-        "checkpoints/intermediate_resnet18.pth",
+        f"checkpoints/intermediate_{model.__class__.__name__.lower()}.pth",
         map_location=device
     )
 
