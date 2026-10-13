@@ -5,6 +5,7 @@ from torchvision import transforms
 from torch.utils.data import DataLoader
 
 from data_loader import FerDataset
+from preprocessing import build_image_transform
 
 def training_loop(model, optimizer, criterion, train_loader, val_loader, epochs):
 
@@ -93,36 +94,7 @@ print(device)
 
 weights = ResNet18_Weights.DEFAULT
 
-train_transform = transforms.Compose([
-    transforms.RandomHorizontalFlip(p=0.5),
-    transforms.RandomRotation(degrees=10),
-    transforms.RandomResizedCrop(
-        size=224,
-        scale=(0.9, 1.0),
-        ratio=(0.95, 1.05)
-    ),
-    transforms.ColorJitter(
-        brightness=0.2,
-        contrast=0.2
-    ),
-    transforms.ToTensor(),
-    transforms.Normalize(
-        mean=weights.transforms().mean,
-        std=weights.transforms().std
-    )
-])
-
-val_transform = transforms.Compose([
-    transforms.Resize((224, 224)),
-    transforms.ToTensor(),
-    transforms.Normalize(mean=weights.transforms().mean,
-                         std=weights.transforms().std),
-])
-
-
 model = resnet18(weights=weights)
-preprocess = weights.transforms()
-print(model)
 
 num_classes = 10
 
@@ -150,14 +122,15 @@ if False:
 
 
 train_dataset = FerDataset(
-    root="data/train/",
-    transform=train_transform
+    "data/train/",
+    build_image_transform(size=224, channels=3, augment=True, mean=weights.transforms().mean, std=weights.transforms().std),
 )
 
 val_dataset = FerDataset(
-    root="data/valid/",
-    transform=val_transform
+    "data/valid/",
+    build_image_transform(size=224, channels=3, augment=False, mean=weights.transforms().mean, std=weights.transforms().std),
 )
+
 
 batch_size = 32
 
@@ -172,7 +145,6 @@ val_loader = DataLoader(
     batch_size=batch_size,
     shuffle=False
 )
-
 
 optimizer = torch.optim.AdamW(list(model.parameters()), lr=1e-4, weight_decay=1e-4)
 

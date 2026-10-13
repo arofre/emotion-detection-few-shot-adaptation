@@ -15,13 +15,7 @@ and disable augmentation by default. Label processing is not included.
 from torchvision import transforms as T
 
 
-def build_image_transform(
-    size=48,
-    channels=1,
-    mean=None,
-    std=None,
-    augment=False,
-):
+def build_image_transform(size=224, channels=1, mean=None, std=None, augment=False,):
     """Convert a PIL image to a float tensor [channels, size, size].
 
     ToTensor scales pixels to [0, 1] before optional normalization.
@@ -40,6 +34,16 @@ def build_image_transform(
     ]
     if augment:
         steps.append(T.RandomHorizontalFlip())
+        steps.append(T.RandomRotation(degrees=10))
+        steps.append(T.RandomResizedCrop(
+            size=224,
+            scale=(0.9, 1.0),
+            ratio=(0.95, 1.05)
+        ))
+        steps.append(T.ColorJitter(
+            brightness=0.2,
+            contrast=0.2
+        ))
 
     steps.append(T.ToTensor())
 
@@ -47,3 +51,5 @@ def build_image_transform(
         steps.append(T.Normalize(mean, std))
 
     return T.Compose(steps)
+
+
