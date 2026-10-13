@@ -2,23 +2,37 @@ import torch
 from torch import nn
 from torchvision.models import resnet18, ResNet18_Weights, EfficientNet_V2_S_Weights, efficientnet_v2_s
 
+import matplotlib.pyplot as plt
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, classification_report
+
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
 
+def plot_confusion_matrix(targets, predictions, class_names, save_path="confusion_matrix.png"):
+    labels = list(range(len(class_names)))
+    y_true, y_pred = targets.numpy(), predictions.numpy()
 
+    cm_counts = confusion_matrix(y_true, y_pred, labels=labels)
+    cm_norm = confusion_matrix(y_true, y_pred, labels=labels, normalize="true")
+
+    fig, axes = plt.subplots(1, 2, figsize=(18, 8))
+
+    ConfusionMatrixDisplay(cm_counts, display_labels=class_names).plot(
+        ax=axes[0], cmap="Blues", xticks_rotation=45, colorbar=False, values_format="d"
+    )
+    axes[0].set_title("Confusion matrix (counts)")
+
+    ConfusionMatrixDisplay(cm_norm, display_labels=class_names).plot(
+        ax=axes[1], cmap="Blues", xticks_rotation=45, colorbar=False, values_format=".2f"
+    )
+    axes[1].set_title("Confusion matrix (row-normalized)")
+
+    plt.show()
+
+    print(classification_report(y_true, y_pred, labels=labels, target_names=class_names, zero_division=0))
 
 
 def evaluate_model(model, dataloader, device="cpu", loss_fn=None):
-    """Return accuracy, optional loss, predictions and targets.
-
-    Expects batches (images, targets), with integer targets [batch_size]
-    and model outputs [batch_size, num_classes]. Raw FER+ vote counts are
-    not accepted. Use deterministic evaluation transforms.
-
-    The caller places the model on device. If supplied, loss_fn must return
-    a scalar batch mean (e.g. standard CrossEntropyLoss, without weights).
-    Predictions and targets are returned as CPU tensors; accuracy is 0..1.
-    """
     was_training = model.training
     correct = total = 0
     loss_sum = 0.0
@@ -70,7 +84,7 @@ if __name__ == "__main__":
     weights = ResNet18_Weights.DEFAULT
 
     model = resnet18(weights=weights)
-    num_classes = 10
+    num_classes = 8
     model.fc = nn.Sequential(
         nn.Dropout(p=0.4),
         nn.Linear(model.fc.in_features, num_classes)
@@ -103,3 +117,12 @@ if __name__ == "__main__":
     )
     results = evaluate_model(model, test_loader, device=device)
     print(f"Test Accuracy: {results['accuracy']:.4f}")
+
+    results = evaluate_model(model, test_loader, device=device)
+    print(f"Test Accuracy: {results['accuracy']:.4f}")
+
+    class_names = [
+        "neutral", "happiness", "surprise", "sadness", "anger",
+        "disgust", "fear", "contempt", "unknown", "NF",
+    ]
+    plot_confusion_matrix(results["targets"], results["predictions"], class_names)

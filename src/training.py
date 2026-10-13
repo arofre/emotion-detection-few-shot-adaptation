@@ -7,7 +7,17 @@ from torch.utils.data import DataLoader
 from data_loader import FerDataset
 from preprocessing import build_image_transform
 
-def training_loop(model, optimizer, criterion, train_loader, val_loader, epochs):
+
+class WeightedKLDiv(nn.Module):
+    def __init__(self, w):
+        super().__init__()
+        self.register_buffer("w", w)
+    def forward(self, log_probs, target):
+        kl = torch.xlogy(target, target) - target * log_probs
+        return (kl * self.w).sum(1).mean()
+
+
+def training_loop(model, optimizer, train_criterion, val_criterion, train_loader, val_loader, epochs):
 
     best_val_loss = float("inf")
 
@@ -27,7 +37,7 @@ def training_loop(model, optimizer, criterion, train_loader, val_loader, epochs)
 
             log_probs = torch.log_softmax(output_batch, dim=1)
 
-            loss = criterion(log_probs, label_batch)
+            loss = train_criterion(log_probs, label_batch)
 
             loss.backward()
             optimizer.step()
@@ -64,7 +74,7 @@ def training_loop(model, optimizer, criterion, train_loader, val_loader, epochs)
 
                 log_probs = torch.log_softmax(output_batch, dim=1)
 
-                loss = criterion(log_probs, label_batch)
+                loss = val_criterion(log_probs, label_batch)
 
                 val_loss += loss.item() * image_batch.size(0)
 
@@ -96,7 +106,7 @@ weights = ResNet18_Weights.DEFAULT
 
 model = resnet18(weights=weights)
 
-num_classes = 10
+num_classes = 8
 
 ''' #classifier istället för fc för vissa modeller
 model.classifier = nn.Sequential(
@@ -148,8 +158,14 @@ val_loader = DataLoader(
     shuffle=False
 )
 
+train_labels = torch.tensor(train_dataset._labels)
+prior = train_labels.mean(0)
 
-criterion = nn.KLDivLoss(reduction="batchmean")
+w = prior.clamp_min(1e-6) ** -0.5
+w = w / (w * prior).sum()
+
+train_criterion = WeightedKLDiv(w.to(device))
+val_criterion = nn.KLDivLoss(reduction="batchmean")
 
 #Only train on classifier
 for param in model.parameters():
@@ -160,14 +176,14 @@ for param in model.fc.parameters():
 
 
 optimizer = torch.optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=1e-4, weight_decay=1e-4)
-training_loop(model, optimizer, criterion, train_loader, val_loader, epochs = 5)
+training_loop(model, optimizer, train_criterion, val_criterion, train_loader, val_loader, epochs = 5)
 
 
 for param in model.layer4.parameters():
     param.requires_grad = True
 
 optimizer = torch.optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=5e-5, weight_decay=1e-4)
-training_loop(model, optimizer, criterion, train_loader, val_loader, epochs = 8)
+training_loop(model, optimizer, train_criterion, val_criterion, train_loader, val_loader, epochs = 8)
 
 
 #Train on all layers lower lr
@@ -175,4 +191,4 @@ for param in model.parameters():
     param.requires_grad = True
 
 optimizer = torch.optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=1e-5, weight_decay=1e-4)
-training_loop(model, optimizer, criterion, train_loader, val_loader, epochs = 5)
+training_loop(model, optimizer, train_criterion, val_criterion, train_loader, val_loader, epochs = 5)

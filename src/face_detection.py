@@ -152,7 +152,7 @@ if __name__ == "__main__":
 
     model.fc = nn.Sequential(
         nn.Dropout(p=0.3),
-        nn.Linear(model.fc.in_features, 10)
+        nn.Linear(model.fc.in_features, 8)
     )
 
     checkpoint = torch.load(

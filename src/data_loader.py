@@ -5,7 +5,7 @@ import pandas as pd
 from PIL import Image
 
 CLASSES =  ['neutral','happiness','surprise','sadness','anger','disgust','fear','contempt','unknown','NF']
-
+EMOTIONS = ['neutral','happiness','surprise','sadness','anger','disgust','fear','contempt']
 
 class FerDataset(Dataset):
     def __init__(self, root, transform = None):
@@ -34,10 +34,14 @@ class FerDataset(Dataset):
         label_path = self.root / 'label.csv'
         
         data = pd.read_csv(label_path, names=['Image name','Box'] + CLASSES)
-        
+
+        votes = data[EMOTIONS].to_numpy(dtype=float)
+        keep = (data['NF'] <= 5) & (data['unknown'] <= 5) & (votes.sum(axis=1) > 0)
+        data = data[keep.values]
+
         samples = data["Image name"].values
-        labels = data[CLASSES].to_numpy(dtype=float)
-        labels = labels / labels.sum(axis=1, keepdims=True)
+        labels = data[EMOTIONS].to_numpy(dtype=float)
+        labels = (labels / labels.sum(axis=1, keepdims=True)).astype("float32")
 
         return samples, labels
 
@@ -47,7 +51,7 @@ if __name__ == "__main__":
     idx = 100
     print(len(a))
     labels = a[idx][1]
-    for cls, value in zip(CLASSES, labels):
+    for cls, value in zip(EMOTIONS, labels):
         if value > 0:
             print(f"{cls}: {value}")
     a[idx][0].show()

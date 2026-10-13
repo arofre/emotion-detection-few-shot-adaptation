@@ -21,7 +21,7 @@ def classify_face(images, model, preprocess, device):
         processed_images.append(image)
 
     if not processed_images:
-        return [], np.empty((0, 10))
+        return [], np.empty((0, 8))
 
     images = torch.stack(processed_images).to(device)
 
