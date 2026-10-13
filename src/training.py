@@ -45,7 +45,7 @@ def training_loop(model, optimizer, criterion, train_loader, val_loader, epochs)
                     "model_state_dict": model.state_dict(),
                     "optimizer_state_dict": optimizer.state_dict(),
                     "train_loss": train_loss,
-                }, "checkpoints/intermediate_efficientnet.pth")
+                }, "checkpoints/intermediate_resnet18.pth")
 
         train_loss /= len(train_loader.dataset)
 
@@ -86,7 +86,7 @@ def training_loop(model, optimizer, criterion, train_loader, val_loader, epochs)
                 "model_state_dict": model.state_dict(),
                 "optimizer_state_dict": optimizer.state_dict(),
                 "val_loss": val_loss,
-            }, "checkpoints/best_emotion_efficientnet.pth")
+            }, "checkpoints/best_emotion_resnet18.pth")
 
 
 device = "cuda" if cuda.is_available() else "cpu"

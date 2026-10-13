@@ -1,19 +1,11 @@
-"""[Förslag] Draft evaluation utilities based on submitted HA notebooks.
-
-Status: proposed implementation for review; not an agreed pipeline component.
-Checked with small synthetic inputs; not integrated with project training.
-
-Sources in SSY340-group-92 (cells counted from 1, including Markdown):
-- HA2/HA2.ipynb, cell 61: evaluate_model (eval/no_grad, argmax, accuracy).
-- HA3/HA3.ipynb, cell 55: validate (validation loss and accuracy).
-- HA4/HA4-Part2.ipynb, cell 50: predict_epoch (collect CPU predictions).
-
-Project adaptations: multiclass targets, sample-weighted mean loss, counting
-actually processed samples, and restoring the previous training mode.
-Precision/recall/F1 and FER+ label processing are not implemented here.
-"""
-
 import torch
+from torch import nn
+from torchvision.models import resnet18, ResNet18_Weights, EfficientNet_V2_S_Weights, efficientnet_v2_s
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"Using device: {device}")
+
+
 
 
 def evaluate_model(model, dataloader, device="cpu", loss_fn=None):
@@ -34,32 +26,27 @@ def evaluate_model(model, dataloader, device="cpu", loss_fn=None):
     model.eval()
 
     try:
-        with torch.no_grad():
+        with torch.inference_mode():
             for images, labels in dataloader:
-                if labels.ndim != 1 or labels.dtype != torch.long:
-                    raise ValueError(
-                        "Expected int64 class targets [batch_size]; "
-                        "process FER+ vote counts before evaluation."
-                    )
                 images, labels = images.to(device), labels.to(device)
                 outputs = model(images)
-                if outputs.ndim != 2 or outputs.shape[0] != labels.shape[0]:
-                    raise ValueError("Expected model outputs [batch_size, num_classes]")
 
                 predicted = outputs.argmax(dim=1)
+                target_indices = torch.argmax(labels, dim=1)
+
                 batch_size = labels.numel()
-                correct += (predicted == labels).sum().item()
+                correct += (predicted == target_indices).sum().item()
                 total += batch_size
                 predictions.append(predicted.cpu())
-                targets.append(labels.cpu())
-
+                targets.append(target_indices.cpu())
                 if loss_fn is not None:
                     loss_sum += loss_fn(outputs, labels).item() * batch_size
+
+    except Exception as e:
+        print(f"Error during evaluation: {e}")
+        raise
     finally:
         model.train(was_training)
-
-    if total == 0:
-        raise ValueError("Evaluation requires at least one sample")
 
     return {
         "accuracy": correct / total,
@@ -67,3 +54,45 @@ def evaluate_model(model, dataloader, device="cpu", loss_fn=None):
         "predictions": torch.cat(predictions),
         "targets": torch.cat(targets),
     }
+
+
+if __name__ == "__main__":
+    from torchvision.models import resnet18, ResNet18_Weights
+    from torch.utils.data import DataLoader
+    from preprocessing import build_image_transform
+    from data_loader import FerDataset
+
+    weights = ResNet18_Weights.DEFAULT
+    preprocess = weights.transforms()
+
+    model = resnet18(weights=weights)
+    num_classes = 10
+    model.fc = nn.Sequential(
+        nn.Dropout(p=0.4),
+        nn.Linear(model.fc.in_features, num_classes)
+    )
+
+    checkpoint = torch.load(
+            "checkpoints/intermediate_resnet18.pth",
+            map_location=device
+        )
+    model.load_state_dict(checkpoint["model_state_dict"])
+    model.to(device)
+
+    test_dataset = FerDataset(
+        root="data/test/",
+        transform=build_image_transform(
+            size=224,
+            channels=3,
+            mean=weights.transforms().mean,
+            std=weights.transforms().std,
+        )
+    )
+
+    test_loader = DataLoader(
+        test_dataset,
+        batch_size=32,
+        shuffle=False,
+    )
+    results = evaluate_model(model, test_loader, device=device)
+    print(f"Test Accuracy: {results['accuracy']:.4f}")
