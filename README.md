@@ -30,8 +30,8 @@ Alla Python-filer nedan ligger i `src/`. **[Förslag]** markerar lösningar som 
 |---|---|---|
 | Dataset loading | `data_loader.py`<br><sub>Läser bilder och annotations</sub> | |
 | Preprocessing | `data_loader.py`<br><sub>Stöd för transform</sub><br>`preprocessing.py`<br><sub>Utkast [Förslag] — image transforms från HA3</sub> | |
-| Modell | | `model.py`<br><sub>Skapar emotionsmodellen</sub> |
-| Training | | `train.py`<br><sub>Training loop och checkpoint</sub> |
+| Modell | `models.py`<br><sub>[Förslag] Gemensamt gränssnitt för sex arkitekturer</sub> | |
+| Training | `training.py`<br><sub>Gemensam training-loop</sub><br>`train_models.py`<br><sub>Tränar en modell åt gången</sub> | |
 | Evaluation | `evaluate.py`<br><sub>Utkast [Förslag] — accuracy, valfri loss och predictions från HA2–HA4</sub> | |
 | Image inference | `classifier.py`<br><sub>classify_face() är en placeholder</sub> | |
 | Webcam | `face_detection.py`<br><sub>MTCNN, face crops och visning</sub> | |
@@ -61,7 +61,58 @@ FER+ finns som **48 × 48 grayscale-PNG** i `data/train`, `data/valid` och `data
 
 [Förslag] Vid sju-klassträning väljs target bland alla åtta emotionsklasser innan bilder med held-out target exkluderas.
 
+## Training & jämförelse
+
+**En training-loop:** `training.py` bygger direkt på Arons original. Endast device och checkpoint-sökvägar är generaliserade; originalets training-beräkningar och utskrifter behålls. Scriptdelen ligger i `train_reference()` för säker import. `train_models.py` skickar valda modeller till denna loop; `compare.py` tränar aldrig.
+
+### Träna en modell
+
+```powershell
+uv run python src/train_models.py
+# Eller välj en modell:
+uv run python src/train_models.py small_cnn --epochs 30
+```
+
+Default körs ResNet-18, MobileNetV3-Small, SqueezeNet, SmallCNN och BalancedCNN i följd. **Pretrained kandidater följer Arons steg:** head (4 epochs, LR 1e-3) → sista blocket + head (6 epochs, LR 1e-4/5e-4) → hela modellen (8 epochs, lägre layer learning rates). Layer-grupperna anpassas i `models.training_stages()`. Custom CNN tränas helt från scratch i 18 epochs med LR 1e-3. `--epochs` anger total budget; andra budgetar fördelas proportionellt för pretrained modeller (minst 3). Device väljs automatiskt.
+
+Samma original-loop, losses, AdamW och augmentation används. Som i originalet fortsätter BatchNorm-statistik uppdateras i training mode även när weights fryses. Input-recept och initiering skiljer sig fortfarande; jämförelsen visar praktiskt resultat, inte identiska startförutsättningar. Bästa checkpoint över alla steg sparas; nästa steg fortsätter från föregående stegs sista weights enligt originalet.
+
+```text
+checkpoints/
+├── best_resnet.pth                 # Arons befintliga referens
+└── modelspeedtest/
+    ├── small_cnn/
+    │   ├── best_small_cnn.pth
+    │   ├── intermediate_small_cnn.pth
+    │   └── config.json
+    ├── balanced_cnn/
+    ├── resnet18/
+    ├── comparison/
+    └── summary.csv
+```
+
+**En ny training ersätter endast den valda modellens senaste körning.** `best` väljs med validation loss; `intermediate` sparas var 100:e batch enligt originalet och innehåller weights, optimizer-state och epoch; det är inte nödvändigtvis sista batchen. CLI-resume är ännu inte implementerat. Originalet skriver train/validation loss; weighted och unweighted loss är inte direkt jämförbara. Ingen ny epoch-historikfil skapas.
+
+### Jämför sparade modeller
+
+```powershell
+uv run python src/compare.py
+```
+
+Laddar tillgängliga checkpoints och Arons `checkpoints/best_resnet.pth` som Reference. Ingen training eller pretrained-download. Äldre `run-*`-kataloger används som fallback om en modell saknar ny checkpoint; de tas inte bort. Endast senaste jämförelseresultaten skrivs till `summary.csv` och `comparison/*.json`.
+
+`--models small_cnn balanced_cnn` begränsar kandidater, `--no-reference` utesluter referensen och `--checkpoint modell=sökväg` väljer en specifik sparad modell. `--device cpu` mäter på CPU.
+
+- Samma FER+-testset och class order, med sparad preprocessing per modell. Ingen testdata används under training. Andra checkpoint-formats och sju-klasmodeller behöver adapter.
+- Model recipes: torchvision input 112 med ImageNet normalization; custom CNN input 48 utan normalization. `balanced_cnn` har 32/64/128 channels och två 3 × 3 convolutions per block (288 488 parameters).
+- Tabellen visar training-typ, accuracy, macro precision/recall/F1 och classifier-latency. Resurstabellen visar Conv/Linear MACs, weights/buffers och extra CUDA peak allocations.
+- Latency gäller ett face crop efter warmup; detection, preprocessing, transfers och total webcam-latency ingår inte. Kort training visar inte slutlig accuracy-potential.
+
+Arons separata ResNet-50-upplägg (4/6/8 epochs) körs fortfarande med `uv run python src/training.py`; dess checkpoints ligger kvar på ursprunglig plats.
+
 ## Öppna beslut
+
+Jämförelsen skriver även en resurstabell: **Conv/FC MMAC** (miljoner multiply-accumulates i Conv/Linear), **State MiB** (parameters + buffers) och **Extra GPU MiB** (extra peak tensor allocations under ett forward pass efter warmup). MAC-estimatet exkluderar övriga operations; GPU-måttet är inte totalt minnesbehov. CPU peak memory och end-to-end webcam latency mäts ännu inte. Värdena sparas även i CSV/JSON.
 
 | Beslut | Fråga inför nästa möte |
 |---|---|
