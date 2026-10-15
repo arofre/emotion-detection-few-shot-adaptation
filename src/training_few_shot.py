@@ -162,7 +162,7 @@ if __name__ == "__main__":
     size = 112
 
     excluded = ["contempt"]
-    
+
     train_dataset_excluded = FerDataset(
         "data/train/",
         build_image_transform(size=size, channels=3, augment=True, mean=transform.mean, std=transform.std),
@@ -256,9 +256,6 @@ if __name__ == "__main__":
 
     load_base(model, f'best_{model_name}_stage13')
 
-
-
-
     test_dataset_excluded = FerDataset(
         root="data/test/",
         transform=build_image_transform(
@@ -287,8 +284,8 @@ if __name__ == "__main__":
     #TRAIN FOR EXCLUDED EMOTIONS
     k = 50
     others = [e for e in EMOTIONS if e != "contempt"]
-    shots={**{e: k * 10 for e in others}, "contempt": k},
-    amplify={"contempt": k * 10},
+    shots = {**{e: k * 10 for e in others}, "contempt": k}
+    amplify = {"contempt": k * 10}
 
     train_dataset_full = FerDataset(
         "data/train/",
