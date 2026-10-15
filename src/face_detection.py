@@ -12,6 +12,8 @@ from torchvision.models import ResNet50_Weights, resnet18, ResNet18_Weights, res
 from torch import nn
 
 from classifier import classify_face
+from preprocessing import build_image_transform
+from model_loader import get_model
 
 
 COLOR = (60, 60, 220)
@@ -144,28 +146,10 @@ def run_webcam(detector, model, preprocess, device):
 if __name__ == "__main__":
     device = "cuda" if torch.cuda.is_available() else "cpu"
     detector = MTCNN(keep_all=True, device=device)
-    #show_image("src/photo.jpg", detector, device)
-    weights = ResNet50_Weights.IMAGENET1K_V2
 
-    #weights = ViT_B_16_Weights.DEFAULT
-    model = resnet50(weights=weights)
-    preprocess = weights.transforms()
+    model, model_transform = get_model("resnet50", 8, load_checkpoint=True, device=device)
 
-    model.fc = nn.Sequential(
-        nn.Dropout(p=0.4),
-        nn.Linear(model.fc.in_features, 8)
-    )
-
-    checkpoint = torch.load(
-        "checkpoints/best_resnet.pth",
-        map_location=device
-    )
-
-    model.load_state_dict(checkpoint["model_state_dict"])
-
-    model = model.to(device)
     model.eval()
+    transform = build_image_transform(size=112, channels=3, augment=False, mean=model_transform.mean, std=model_transform.std)
 
-
-
-    run_webcam(detector, model, preprocess, device)
+    run_webcam(detector, model, transform, device)

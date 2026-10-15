@@ -161,7 +161,7 @@ if __name__ == "__main__":
 
     size = 112
 
-    excluded = ["contempt"]
+    excluded = ["happiness"]
 
     train_dataset_excluded = FerDataset(
         "data/train/",
@@ -276,16 +276,16 @@ if __name__ == "__main__":
 
     new_idx = EMOTIONS.index(excluded[0]) 
     target_map = torch.tensor([i for i in range(8) if i != new_idx])
-    results = evaluate_model(model, test_loader_excluded, device=device, target_map=target_map)
+    results = evaluate_model(model, test_loader_excluded, device=device, target_map=target_map, map_predictions=True)
     print(f"Test Accuracy: {results['accuracy']:.4f}")
 
     evaluation_report(results["targets"], results["predictions"], EMOTIONS, f"{model_name}_stage1")
 
     #TRAIN FOR EXCLUDED EMOTIONS
     k = 50
-    others = [e for e in EMOTIONS if e != "contempt"]
-    shots = {**{e: k * 10 for e in others}, "contempt": k}
-    amplify = {"contempt": k * 10}
+    others = [e for e in EMOTIONS if e != excluded[0]]
+    shots = {**{e: k * 10 for e in others}, f"{excluded[0]}": k}
+    amplify = {f"{excluded[0]}": k * 10}
 
     train_dataset_full = FerDataset(
         "data/train/",

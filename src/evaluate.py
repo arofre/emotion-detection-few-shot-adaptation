@@ -5,6 +5,7 @@ from torchvision.models import ResNet50_Weights, resnet18, ResNet18_Weights, Eff
 import matplotlib.pyplot as plt
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, classification_report
 import pandas as pd
+import os
 
 from model_loader import get_model
 
@@ -27,7 +28,8 @@ def evaluation_report(targets, predictions, class_names, save_name=None, show=Tr
     axes[1].set_title("Confusion matrix (row-normalized)")
 
     if save_name:
-        fig.savefig(f"{save_name}_confusion.png", dpi=200, bbox_inches="tight")
+        os.makedirs(f"results/{save_name}", exist_ok=True)
+        fig.savefig(f"results/{save_name}/confusion.png", dpi=200, bbox_inches="tight")
     if show:
         plt.show()
     plt.close(fig)
@@ -37,11 +39,13 @@ def evaluation_report(targets, predictions, class_names, save_name=None, show=Tr
     print(classification_report(y_true, y_pred, labels=labels,
                                 target_names=class_names, zero_division=0))
     if save_name:
-        pd.DataFrame(report).T.to_csv(f"{save_name}.csv")
+        os.makedirs(f"results/{save_name}", exist_ok=True)
+        pd.DataFrame(report).T.to_csv(f"results/{save_name}/{save_name}.csv")
     return report
 
 
-def evaluate_model(model, dataloader, device="cpu", loss_fn=None, target_map=None):
+
+def evaluate_model(model, dataloader, device="cpu", loss_fn=None, target_map=None, map_predictions=False):
     was_training = model.training
     correct = total = 0
     loss_sum = 0.0
@@ -57,8 +61,12 @@ def evaluate_model(model, dataloader, device="cpu", loss_fn=None, target_map=Non
                 predicted = torch.argmax(outputs, dim=1)
 
                 target_indices = torch.argmax(labels, dim=1)
+
                 if target_map is not None: 
-                    target_indices = target_map.to(device)[target_indices]
+                    target_map = target_map.to(device)
+                    target_indices = target_map[target_indices]
+                    if map_predictions:
+                        predicted = target_map[predicted]
 
                 batch_size = labels.size(0)
 
@@ -91,7 +99,7 @@ if __name__ == "__main__":
     from data_loader import FerDataset
 
 
-    model, transform = get_model("resnet18", 8, load_checkpoint=True, device=device)
+    model, transform = get_model("resnet50", 8, load_checkpoint=True, device=device)
 
     test_dataset = FerDataset(
         root="data/test/",
