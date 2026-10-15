@@ -1,3 +1,4 @@
+from matplotlib.artist import get
 from torch import nn, cuda, optim
 import torch
 from torchvision.models import resnet50, ResNet50_Weights, EfficientNet_V2_S_Weights, efficientnet_v2_s, vit_b_16, ViT_B_16_Weights
@@ -7,7 +8,7 @@ from torch.utils.data import DataLoader
 
 from data_loader import FerDataset
 from preprocessing import build_image_transform
-
+from model_loader import get_model
 
 class WeightedKLDiv(nn.Module):
     def __init__(self, w):
@@ -18,7 +19,7 @@ class WeightedKLDiv(nn.Module):
         return (kl * self.w).sum(1).mean()
 
 
-def training_loop(model, optimizer, train_criterion, val_criterion, train_loader, val_loader, epochs):
+def training_loop(model, optimizer, train_criterion, val_criterion, train_loader, val_loader, epochs, checkpoint_name):
 
     best_val_loss = float("inf")
 
@@ -57,7 +58,7 @@ def training_loop(model, optimizer, train_criterion, val_criterion, train_loader
                     "model_state_dict": model.state_dict(),
                     "optimizer_state_dict": optimizer.state_dict(),
                     "train_loss": train_loss,
-                }, f"checkpoints/intermediate_{model.__class__.__name__.lower()}.pth")
+                }, f"checkpoints/intermediate/intermediate_{checkpoint_name}.pth")
 
         train_loss /= len(train_loader.dataset)
 
@@ -98,7 +99,7 @@ def training_loop(model, optimizer, train_criterion, val_criterion, train_loader
                 "model_state_dict": model.state_dict(),
                 "optimizer_state_dict": optimizer.state_dict(),
                 "val_loss": val_loss,
-            }, f"checkpoints/best_{model.__class__.__name__.lower()}.pth")
+            }, f"checkpoints/best_{checkpoint_name}.pth")
 
 
 def set_trainable_layers(model, trainable_layers):
@@ -123,130 +124,100 @@ def make_optimizer(model, layer_lrs, weight_decay=1e-4):
         weight_decay=weight_decay,
     )
 
-device = "cuda" if cuda.is_available() else "cpu"
-print(device)
 
-weights = ResNet50_Weights.IMAGENET1K_V2
-
-model = resnet50(weights=weights)
-
-num_classes = 8
-
-model.fc = nn.Sequential(
-    nn.Dropout(p=0.4),
-    nn.Linear(model.fc.in_features, num_classes)
-)
-
-'''
-model.classifier = nn.Sequential(
-    nn.Dropout(p=0.4),
-    nn.Linear(model.classifier[1].in_features, num_classes)
-)
+if __name__ == "__main__":
+    device = "cuda" if cuda.is_available() else "cpu"
+    print(device)
 
 
-model.heads.head = nn.Sequential(
-    nn.Dropout(p=0.4),
-    nn.Linear(model.heads.head.in_features, num_classes)
-)
-''' #classifier istället för fc för vissa modeller
+    model_name = "resnet18"
+    model, transform = get_model(model_name, 8, load_checkpoint=False, device=device)
 
-model = model.to(device)
+    size = 112
 
-#Used to load a previously trained model and continue training it
-if False:
-    checkpoint = torch.load(
-        f"checkpoints/intermediate_{model.__class__.__name__.lower()}.pth",
-        map_location=device
+    train_dataset = FerDataset(
+        "data/train/",
+        build_image_transform(size=size, channels=3, augment=True, mean=transform.mean, std=transform.std),
     )
 
-    model.load_state_dict(checkpoint["model_state_dict"])
+    val_dataset = FerDataset(
+        "data/valid/",
+        build_image_transform(size=size, channels=3, augment=False, mean=transform.mean, std=transform.std),
+    )
+    batch_size = 32
 
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=batch_size,
+        shuffle=True
+    )
 
-size = 112
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=batch_size,
+        shuffle=False
+    )
 
-train_dataset = FerDataset(
-    "data/train/",
-    build_image_transform(size=size, channels=3, augment=True, mean=weights.transforms().mean, std=weights.transforms().std),
-)
+    train_labels = torch.tensor(train_dataset._labels)
+    prior = train_labels.mean(0)
 
-val_dataset = FerDataset(
-    "data/valid/",
-    build_image_transform(size=size, channels=3, augment=False, mean=weights.transforms().mean, std=weights.transforms().std),
-)
-batch_size = 32
+    w = prior.clamp_min(1e-6) ** -0.5
+    w = w / (w * prior).sum()
 
-train_loader = DataLoader(
-    train_dataset,
-    batch_size=batch_size,
-    shuffle=True
-)
+    train_criterion = WeightedKLDiv(w.to(device))
+    val_criterion = nn.KLDivLoss(reduction="batchmean")
 
-val_loader = DataLoader(
-    val_dataset,
-    batch_size=batch_size,
-    shuffle=False
-)
+    set_trainable_layers(model, ["fc"])
 
-train_labels = torch.tensor(train_dataset._labels)
-prior = train_labels.mean(0)
+    optimizer = make_optimizer(
+        model,
+        {
+            "fc": 1e-3,
+        },
+    )
 
-w = prior.clamp_min(1e-6) ** -0.5
-w = w / (w * prior).sum()
+    training_loop(
+        model, optimizer,
+        train_criterion, val_criterion,
+        train_loader, val_loader,
+        epochs=4, checkpoint_name=model_name
+    )
 
-train_criterion = WeightedKLDiv(w.to(device))
-val_criterion = nn.KLDivLoss(reduction="batchmean")
+    set_trainable_layers(model, ["layer4", "fc"])
 
-set_trainable_layers(model, ["fc"])
+    optimizer = make_optimizer(
+        model,
+        {
+            "layer4": 1e-4,
+            "fc": 5e-4,
+        },
+    )
 
-optimizer = make_optimizer(
-    model,
-    {
-        "fc": 1e-3,
-    },
-)
+    training_loop(
+        model, optimizer,
+        train_criterion, val_criterion,
+        train_loader, val_loader,
+        epochs=6, checkpoint_name=model_name
+    )
 
-training_loop(
-    model, optimizer,
-    train_criterion, val_criterion,
-    train_loader, val_loader,
-    epochs=4,
-)
+    set_trainable_layers(model, ["conv1", "bn1", "layer1", "layer2", "layer3", "layer4", "fc"])
 
-set_trainable_layers(model, ["layer4", "fc"])
+    optimizer = make_optimizer(
+        model,
+        {
+            "conv1": 1e-6,
+            "bn1": 1e-6,
+            "layer1":1e-6,
+            "layer2": 2e-6,
+            "layer3": 5e-6,
+            "layer4": 1e-5,
+            "fc": 5e-5,
+        },
+    )
 
-optimizer = make_optimizer(
-    model,
-    {
-        "layer4": 1e-4,
-        "fc": 5e-4,
-    },
-)
-
-training_loop(
-    model, optimizer,
-    train_criterion, val_criterion,
-    train_loader, val_loader,
-    epochs=6,
-)
-
-set_trainable_layers(model, ["conv1", "bn1", "layer1", "layer2", "layer3", "layer4", "fc"])
-
-optimizer = make_optimizer(
-    model,
-    {
-        "conv1": 1e-6,
-        "bn1": 1e-6,
-        "layer1":1e-6,
-        "layer2": 2e-6,
-        "layer3": 5e-6,
-        "layer4": 1e-5,
-        "fc": 5e-5,
-    },
-)
-
-training_loop(
-    model, optimizer,
-    train_criterion, val_criterion,
-    train_loader, val_loader,
-    epochs=8,
-)
+    training_loop(
+        model, optimizer,
+        train_criterion, val_criterion,
+        train_loader, val_loader,
+        epochs=8, checkpoint_name=model_name
+    )

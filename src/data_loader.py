@@ -8,17 +8,16 @@ CLASSES  = ['neutral','happiness','surprise','sadness','anger','disgust','fear',
 EMOTIONS = ['neutral','happiness','surprise','sadness','anger','disgust','fear','contempt']
 
 class FerDataset(Dataset):
-    def __init__(self, root, transform=None, excluded_emotions=None):
+    def __init__(self, root, transform=None, excluded_emotions=None,
+                 shots=None, amplify=None):
         self.root = Path(root)
         self.transform = transform
         self.excluded_emotions = list(excluded_emotions or [])
-
-        invalid = set(self.excluded_emotions) - set(EMOTIONS)
-        if invalid:
-            raise ValueError(f"Unknown emotions: {sorted(invalid)}")
+        self.shots = dict(shots or {})
+        self.amplify = dict(amplify or {})
 
         self.emotions = [e for e in EMOTIONS if e not in self.excluded_emotions]
-        self._samples, self._labels = self._collect_samples()
+        self._samples, self._labels, self.dominant = self._collect_samples()
 
     def __getitem__(self, index):
         path = self.root / self._samples[index]
@@ -31,9 +30,26 @@ class FerDataset(Dataset):
     def __len__(self):
         return len(self._samples)
 
+    def _resample(self, dominant):
+        if not self.shots and not self.amplify:
+            return np.arange(len(dominant))
+
+        parts = []
+        for c, name in enumerate(EMOTIONS):
+            members = np.flatnonzero(dominant == c)
+            if len(members) == 0:
+                continue
+            k = self.shots.get(name)
+            if k is not None and k < len(members):
+                members = np.random.choice(members, size=k, replace=False) 
+            n = self.amplify.get(name)
+            if n is not None and n > len(members):
+                members = np.resize(members, n)   
+            parts.append(members)
+        return np.concatenate(parts)
+
     def _collect_samples(self):
         data = pd.read_csv(self.root / "label.csv", names=["Image name", "Box"] + CLASSES)
-
         data = data[(data["NF"] <= 5) & (data["unknown"] <= 5)]
 
         votes = data[EMOTIONS].to_numpy(dtype=float)
@@ -47,8 +63,10 @@ class FerDataset(Dataset):
         samples = data["Image name"].values[keep]
         kept_votes = votes[keep][:, kept_idx]
         labels = (kept_votes / kept_votes.sum(axis=1, keepdims=True)).astype("float32")
-        return samples, labels
+        dominant = dominant[keep]
 
+        idx = self._resample(dominant)
+        return samples[idx], labels[idx], dominant[idx]
 
 if __name__ == "__main__":
     a = FerDataset("data/train/", excluded_emotions=["contempt"])

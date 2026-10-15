@@ -12,7 +12,7 @@ Normalize, and training augmentation.
 from torchvision import transforms as T
 
 
-def build_image_transform(size=224, channels=1, mean=None, std=None, augment=False,):
+def build_image_transform(size=224, channels=1, mean=None, std=None, augment=False, strong=False):
     """Convert a PIL image to a float tensor [channels, size, size].
 
     ToTensor scales pixels to [0, 1] before optional normalization.
@@ -30,17 +30,13 @@ def build_image_transform(size=224, channels=1, mean=None, std=None, augment=Fal
         T.Resize((size, size), antialias=True),
     ]
     if augment:
-        steps.append(T.RandomHorizontalFlip())
-        steps.append(T.RandomRotation(degrees=7))
-        steps.append(T.RandomResizedCrop(
-            size=size,
-            scale=(0.9, 1.0),
-            ratio=(0.95, 1.05)
-        ))
-        steps.append(T.ColorJitter(
-            brightness=0.2,
-            contrast=0.2
-        ))
+        deg, scale = (15, (0.8, 1.0)) if strong else (7, (0.9, 1.0))
+        steps += [
+            T.RandomHorizontalFlip(),
+            T.RandomRotation(deg),
+            T.RandomResizedCrop(size=size, scale=scale, ratio=(0.9, 1.1)),
+            T.ColorJitter(brightness=0.3, contrast=0.3),
+        ]
 
     steps.append(T.ToTensor())
 
