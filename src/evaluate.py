@@ -40,7 +40,7 @@ def evaluation_report(targets, predictions, class_names, save_name=None, show=Tr
                                 target_names=class_names, zero_division=0))
     if save_name:
         os.makedirs(f"results/{save_name}", exist_ok=True)
-        pd.DataFrame(report).T.to_csv(f"results/{save_name}/{save_name}.csv")
+        pd.DataFrame(report).T.to_csv(f"results/{save_name}/classification_report.csv")
     return report
 
 

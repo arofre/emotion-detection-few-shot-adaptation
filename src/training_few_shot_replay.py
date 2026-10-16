@@ -1,11 +1,13 @@
-from matplotlib.artist import get
+import copy
+import numpy as np 
 import pandas as pd
 from torch import nn, cuda, optim
 import torch
 from torchvision.models import resnet50, ResNet50_Weights, EfficientNet_V2_S_Weights, efficientnet_v2_s, vit_b_16, ViT_B_16_Weights
+import torch.nn.functional as F 
 
 from torchvision import transforms
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, ConcatDataset
 
 from data_loader import FerDataset, EMOTIONS
 from preprocessing import build_image_transform
@@ -15,24 +17,68 @@ from evaluate import evaluation_report, evaluate_model
 device = "cuda" if cuda.is_available() else "cpu"
 print(device)
 
+SEED = 0 
+AMPLIFY_REPS = 10 
+
 class WeightedKLDiv(nn.Module):
     def __init__(self, w):
         super().__init__()
         self.register_buffer("w", w)
     def forward(self, log_probs, target):
         kl = torch.xlogy(target, target) - target * log_probs
-        return (kl * self.w).sum(1).mean()
+        return (kl * self.w).sum(1).mean()        
+
 
 @torch.no_grad()
-def expand_head(model, new_idx, n_total=8):
-    old = model.fc[1]  
-    new = nn.Linear(old.in_features, n_total).to(old.weight.device)
+def compute_prototype(model, loader, device):
+    model.eval()
+    features = []
+
+    for images, _ in loader:
+        images = images.to(device)
+
+        x = model.conv1(images)
+        x = model.bn1(x)
+        x = model.relu(x)
+        x = model.maxpool(x)
+        x = model.layer1(x)
+        x = model.layer2(x)
+        x = model.layer3(x)
+        x = model.layer4(x)
+        x = model.avgpool(x)
+        x = torch.flatten(x, 1)
+
+        features.append(x)
+
+    features = torch.cat(features, dim=0)
+
+    features = nn.functional.normalize(features, p=2, dim=1)
+    prototype = features.mean(dim=0)
+    prototype = nn.functional.normalize(prototype, p=2, dim=0)
+
+    return prototype
+
+
+@torch.no_grad()
+def expand_head(model, new_idx, prototype, n_total=8):
+    old = model.fc[1]
+
+    new = nn.Linear(
+        old.in_features, n_total,
+        device=old.weight.device,
+        dtype=old.weight.dtype,
+    )
+
     kept = [i for i in range(n_total) if i != new_idx]
-    new.weight[kept] = old.weight 
+
+    new.weight[kept] = old.weight
     new.bias[kept] = old.bias
-    nn.init.normal_(new.weight[new_idx], std=0.01) 
-    new.bias[new_idx] = old.bias.mean()
-    model.fc[1] = new 
+    new.weight[new_idx] = prototype.to(
+        device=new.weight.device,
+        dtype=new.weight.dtype,
+    )
+    new.bias[new_idx] = 0.0
+    model.fc[1] = new
 
 def set_adaptation_mode(model, keep_dropout=True):
     model.train()
@@ -47,8 +93,6 @@ def load_base(model, name):
     model.load_state_dict(ckpt["model_state_dict"])
 
 def training_loop(model, optimizer, train_criterion, val_criterion, train_loader, val_loader, epochs, checkpoint_name, freeze_bn=False):
-
-    best_val_loss = float("inf")
 
     for epoch in range(epochs):
         if freeze_bn:
@@ -76,19 +120,6 @@ def training_loop(model, optimizer, train_criterion, val_criterion, train_loader
             optimizer.step()
 
             train_loss += loss.item() * image_batch.size(0)
-            #if batch_nr % 100 == 0:
-            #    print(
-            #        f"Batch {batch_nr}: "
-            #        f"Loss = {loss.item():.4f}"
-            #    )
-
-            #if batch_nr % 100 == 0:
-            #    torch.save({
-            #        "epoch": epoch + 1,
-            #        "model_state_dict": model.state_dict(),
-            #        "optimizer_state_dict": optimizer.state_dict(),
-            #        "train_loss": train_loss,
-            #    }, f"checkpoints/few_shot/intermediate_{checkpoint_name}.pth")
 
         train_loss /= len(train_loader.dataset)
 
@@ -120,16 +151,14 @@ def training_loop(model, optimizer, train_criterion, val_criterion, train_loader
             f"Val Loss: {val_loss:.4f}"
         )
 
-        if val_loss < best_val_loss:
 
-            best_val_loss = val_loss
 
-            torch.save({
-                "epoch": epoch + 1,
-                "model_state_dict": model.state_dict(),
-                "optimizer_state_dict": optimizer.state_dict(),
-                "val_loss": val_loss,
-            }, f"checkpoints/few_shot/best_{checkpoint_name}.pth")
+    torch.save({
+        "epoch": epoch + 1,
+        "model_state_dict": model.state_dict(),
+        "optimizer_state_dict": optimizer.state_dict(),
+        "val_loss": val_loss,
+    }, f"checkpoints/few_shot/best_{checkpoint_name}.pth")
 
 
 def set_trainable_layers(model, trainable_layers):
@@ -153,6 +182,11 @@ def make_optimizer(model, layer_lrs, weight_decay=1e-4):
         ],
         weight_decay=weight_decay,
     )
+
+
+def make_support(tf, k, novel, others):
+    np.random.seed(SEED)
+    return FerDataset("data/train/", tf, shots={**{e: 0 for e in others}, novel: k})
 
 
 if __name__ == "__main__":
@@ -278,94 +312,88 @@ if __name__ == "__main__":
     target_map = torch.tensor([i for i in range(8) if i != new_idx])
     results = evaluate_model(model, test_loader_excluded, device=device, target_map=target_map, map_predictions=True)
     print(f"Test Accuracy: {results['accuracy']:.4f}")
+    ref_base_acc = results["accuracy"] 
 
-    evaluation_report(results["targets"], results["predictions"], EMOTIONS, f"{model_name}_stage1")
+    report_before = evaluation_report(results["targets"], results["predictions"], EMOTIONS, f"{model_name}_stage1", show=False)
 
-    #TRAIN FOR EXCLUDED EMOTIONS
-    k = 50
     others = [e for e in EMOTIONS if e != excluded[0]]
-    shots = {**{e: k * 10 for e in others}, f"{excluded[0]}": k}
-    amplify = {f"{excluded[0]}": k * 10}
+    eval_transform = build_image_transform(size=size, channels=3, augment=False, mean=transform.mean, std=transform.std)
+    strong_transform = build_image_transform(size=size, channels=3, augment=True, mean=transform.mean, std=transform.std, strong=True)
 
-    train_dataset_full = FerDataset(
-        "data/train/",
-        build_image_transform(size=size, channels=3, augment=True, mean=transform.mean, std=transform.std, strong=True),
-        amplify=amplify,         
-        shots=shots
-    )
+    test_dataset_full = FerDataset(root="data/test/", transform=eval_transform)
+    test_loader_full = DataLoader(test_dataset_full, batch_size=32, shuffle=False)
 
-    
+    val_dataset_full = FerDataset("data/valid/", eval_transform)
+    val_loader_full = DataLoader(val_dataset_full, batch_size=batch_size, shuffle=False)
 
-    val_dataset_full = FerDataset(
-        "data/valid/",
-        build_image_transform(size=size, channels=3, augment=False, mean=transform.mean, std=transform.std),
-    )
-    batch_size = 32
+    base_state = copy.deepcopy(model.state_dict())
+    rows = []  
 
-    train_loader_full = DataLoader(
-        train_dataset_full,
-        batch_size=batch_size,
-        shuffle=True,
-    )
+    for k in [20, 50, 100, 200, 500]:
+        for replay_multiplier in [0.5, 1, 2, 5, 10]:
+            model.fc[1] = nn.Linear(base_state["fc.1.weight"].size(1), 7).to(device)
+            model.load_state_dict(base_state)
 
-    val_loader_full = DataLoader(
-        val_dataset_full,
-        batch_size=batch_size,
-        shuffle=False
-    )
+            torch.manual_seed(SEED) 
 
-    train_labels = torch.tensor(train_dataset_full._labels)
-    prior = train_labels.mean(0)
+            replay_size = int(k * replay_multiplier)
 
-    w = prior.clamp_min(1e-6) ** -0.5
-    w = w / (w * prior).sum()
+            np.random.seed(SEED)
+            old_dataset = FerDataset(
+                "data/train/",
+                transform=strong_transform,
+                shots={**{e: replay_size for e in others}, excluded[0]: 0},
+            )
+            support_proto = make_support(eval_transform, k, excluded[0], others)
+            support_train = make_support(strong_transform, k, excluded[0], others)
 
-    train_criterion = WeightedKLDiv(w.to(device))
-    val_criterion = nn.KLDivLoss(reduction="batchmean")
+            train_dataset_full = ConcatDataset([old_dataset] + [support_train] * AMPLIFY_REPS)
 
-    expand_head(model, new_idx=EMOTIONS.index(excluded[0]), n_total=8)
+            train_loader_full = DataLoader(
+                train_dataset_full,
+                batch_size=batch_size,
+                shuffle=True,
+            )
 
-    set_trainable_layers(model, ["fc"])
-    
-    optimizer = make_optimizer(
-        model,
-        {
-            "fc": 1e-3,
-        },
-    )
+            prototype_loader = DataLoader(
+                support_proto, 
+                batch_size=batch_size,
+                shuffle=False
+            )
 
-    training_loop(
-        model, optimizer,
-        train_criterion, val_criterion,
-        train_loader_full, val_loader_full,
-        epochs=6, checkpoint_name=f'{model_name}_stage2',
-        freeze_bn=True
-    )
+            train_labels = torch.tensor(np.concatenate([old_dataset._labels] + [support_train._labels] * AMPLIFY_REPS))
+            prior = train_labels.mean(0)
 
-    test_dataset_full = FerDataset(
-        root="data/test/",
-        transform=build_image_transform(
-            size=112,
-            channels=3,
-            augment=False,
-            mean=transform.mean,
-            std=transform.std,
-        ),
-    )
+            w = prior.clamp_min(1e-6) ** -0.5
+            w = w / (w * prior).sum()
 
-    test_loader_full = DataLoader(
-        test_dataset_full,
-        batch_size=32,
-        shuffle=False,
-    )
+            train_criterion = WeightedKLDiv(w.to(device))
+            val_criterion = nn.KLDivLoss(reduction="batchmean")
 
-    load_base(model, f'best_{model_name}_stage2')
+            prototype = compute_prototype(model, prototype_loader, device=device)
+            expand_head(model, new_idx=EMOTIONS.index(excluded[0]), prototype=prototype, n_total=8)
 
-    results_old = evaluate_model(model, test_loader_excluded, device=device, target_map=target_map)
-    print(f"Old-class accuracy after adaptation: {results_old['accuracy']:.4f}")
-    evaluation_report(results_old["targets"], results_old["predictions"], EMOTIONS,
-                    f"{model_name}_stage2_oldclasses")
+            set_trainable_layers(model, ["fc"])
+            
+            optimizer = make_optimizer(
+                model,
+                {
+                    "fc": 1e-3,
+                },
+            )
 
-    results = evaluate_model(model, test_loader_full, device=device)
-    print(f"New-class accuracy after adaptation: {results['accuracy']:.4f}")
-    evaluation_report(results["targets"], results["predictions"], EMOTIONS, f"{model_name}_stage2")
+            training_loop(
+                model, optimizer,
+                train_criterion, val_criterion,
+                train_loader_full, val_loader_full,
+                epochs=6, checkpoint_name=f'{model_name}_stage2',
+                freeze_bn=True
+            )
+
+            load_base(model, f'best_{model_name}_stage2')
+
+            results_old = evaluate_model(model, test_loader_excluded, device=device, target_map=target_map)
+            report_stage2_excluded = evaluation_report(results_old["targets"], results_old["predictions"], EMOTIONS, f"replay_{excluded[0]}/{model_name}_k{k}_r{replay_multiplier}_stage2_excluded", show=False)
+
+            results = evaluate_model(model, test_loader_full, device=device)
+            report_after = evaluation_report(results["targets"], results["predictions"], EMOTIONS, f"replay_{excluded[0]}/{model_name}_k{k}_r{replay_multiplier}_stage2", show=False)
