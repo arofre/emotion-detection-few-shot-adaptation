@@ -22,7 +22,7 @@ ResNet50 (ImageNet weights) is trained on 7 of the 8 FER+ emotions using KL-dive
 **Replay baseline.** Same prototype initialisation, then the linear head is fine-tuned on the
 k support images plus N replayed images per old class.
 
-##Respository structure
+## Respository structure
 ```
 .
 ├── src/
