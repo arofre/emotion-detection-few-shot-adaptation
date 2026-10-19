@@ -10,6 +10,7 @@ import torch
 from collections import Counter, deque
 from torchvision.models import ResNet50_Weights, resnet18, ResNet18_Weights, resnet50
 from torch import nn
+import numpy as np
 
 from classifier import classify_face
 from preprocessing import build_image_transform
@@ -18,22 +19,89 @@ from model_loader import get_model
 
 COLOR = (60, 60, 220)
 
-def show_image(path, detector, device):
+
+def show_image(path, detector, model, preprocess, device):
     image = Image.open(path).convert("RGB")
+    frame = cv2.cvtColor(
+        np.array(image),
+        cv2.COLOR_RGB2BGR
+    )
 
-    start = time.time()
-    boxes, probs = detector.detect(image)
-    print(time.time() - start)
+    h, w = frame.shape[:2]
+    face_images = []
+    valid_boxes = []
 
-    fig, ax = plt.subplots()
-    ax.imshow(image)
-    if boxes is not None:
-        for (x1, y1, x2, y2), p in zip(boxes, probs):
-            ax.add_patch(patches.Rectangle((x1, y1), x2 - x1, y2 - y1,
-                                           linewidth=2, edgecolor="red", facecolor="none"))
-            ax.text(x1, y1, f"{p:.2f}", color="red", fontsize=10)
-    ax.axis("off")
-    plt.show()
+    start_time = time.time()
+
+    detected_boxes, probabilities = detector.detect(
+        cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    )
+
+    for box in detected_boxes if detected_boxes is not None else []:
+        x1, y1, x2, y2 = box
+
+        x1 = int(max(0, min(x1, w - 1)))
+        x2 = int(max(0, min(x2, w)))
+        y1 = int(max(0, min(y1, h - 1)))
+        y2 = int(max(0, min(y2, h)))
+
+        if x2 <= x1 or y2 <= y1:
+            continue
+
+        face = frame[y1:y2, x1:x2]
+
+        if face.size == 0:
+            continue
+
+        face_images.append(face)
+        valid_boxes.append((x1, y1, x2, y2))
+
+    classified_boxes = []
+
+    if face_images:
+        emotions, emotion_probabilities = classify_face(
+            face_images, model, preprocess, device
+        )
+
+        classified_boxes = [
+            (*box, emotion, probability)
+            for box, emotion, probability in zip(
+                valid_boxes,
+                emotions,
+                emotion_probabilities.max(axis=1)
+            )
+        ]
+
+    elapsed_time = time.time() - start_time
+
+    for x1, y1, x2, y2, emotion, probability in classified_boxes:
+        cv2.rectangle(frame, (x1, y1), (x2, y2), COLOR, 2)
+
+        label = f"{emotion} {probability:.3f}"
+        cv2.putText(
+            frame,
+            label,
+            (x1, max(y1 - 10, 20)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.9,
+            COLOR,
+            2
+        )
+
+    cv2.putText(
+        frame,
+        f"{elapsed_time * 1000:.0f}ms",
+        (10, 30),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        1,
+        COLOR,
+        2
+    )
+
+    cv2.imshow("Image", frame)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
+
 
 
 
@@ -81,7 +149,6 @@ def run_webcam(detector, model, preprocess, device):
                     continue
 
                 face_images.append(face)
-                #Ganska ful lösing för att fixa när ett ansikte är i kanten av bilden
                 valid_boxes.append((x1, y1, x2, y2))
 
 
@@ -103,8 +170,7 @@ def run_webcam(detector, model, preprocess, device):
                 state["boxes"] = classified_boxes
 
     thread = threading.Thread(target=worker, daemon=True)
-    thread.start() #Jag ska vara helt ärlig och säga att jag inte riktigt vet
-                   #hur threading fungerar
+    thread.start() 
 
     while True:
         ok, frame = cap.read()
@@ -144,12 +210,12 @@ def run_webcam(detector, model, preprocess, device):
 
 
 if __name__ == "__main__":
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = "cpu"#"cuda" if torch.cuda.is_available() else "cpu"
     detector = MTCNN(keep_all=True, device=device)
 
     model, model_transform = get_model("resnet50", 8, load_checkpoint=True, device=device)
 
     model.eval()
     transform = build_image_transform(size=112, channels=3, augment=False, mean=model_transform.mean, std=model_transform.std)
-
+    show_image("src/photo.jpg", detector, model, transform, device)
     run_webcam(detector, model, transform, device)
