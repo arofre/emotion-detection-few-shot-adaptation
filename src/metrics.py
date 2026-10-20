@@ -13,7 +13,7 @@ base = pd.read_csv(
     index_col=0
 )
 
-print("Results for exemplar replay linear classifier")
+print("Results for cosine linear classifier")
 reports = {}
 for folder in [20, 50, 100, 200, 500]:
     k_report = pd.read_csv(f"results/cosine_{emotion}/resnet50_k{folder}_stage2/classification_report.csv", index_col=0)

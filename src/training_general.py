@@ -6,7 +6,8 @@ from torchvision.models import resnet50, ResNet50_Weights, EfficientNet_V2_S_Wei
 from torchvision import transforms
 from torch.utils.data import DataLoader
 
-from data_loader import FerDataset
+from data_loader import EMOTIONS, FerDataset
+from evaluate import evaluate_model, evaluation_report
 from preprocessing import build_image_transform
 from model_loader import get_model
 
@@ -132,7 +133,7 @@ if __name__ == "__main__":
 
     model_name = "resnet18"
     model, transform = get_model(model_name, 8, load_checkpoint=False, device=device)
-
+    print(model)
     size = 112
 
     train_dataset = FerDataset(
@@ -221,3 +222,34 @@ if __name__ == "__main__":
         train_loader, val_loader,
         epochs=8, checkpoint_name=model_name
     )
+
+    set_trainable_layers(model, ["fc"])
+
+    optimizer = make_optimizer(
+        model,
+        {
+            "fc": 1e-4,
+        },
+    )
+
+    training_loop(
+        model, optimizer,
+        train_criterion, val_criterion,
+        train_loader, val_loader,
+        epochs=2, checkpoint_name=model_name
+    )
+
+    test_dataset = FerDataset(
+        "data/test/",
+        build_image_transform(size=size, channels=3, augment=False, mean=transform.mean, std=transform.std),
+    )
+
+    test_loader = DataLoader(
+        test_dataset,
+        batch_size=batch_size,
+        shuffle=False
+    )
+
+    results = evaluate_model(model, test_loader, device=device)
+    evaluation_report(results["targets"], results["predictions"], EMOTIONS,
+            f"{model_name}/{model_name}", show=False)

@@ -9,7 +9,7 @@ EMOTIONS = ['neutral','happiness','surprise','sadness','anger','disgust','fear',
 
 class FerDataset(Dataset):
     def __init__(self, root, transform=None, excluded_emotions=None,
-                 shots=None, amplify=None, seed=24):
+                 shots=None, amplify=None):
         self.root = Path(root)
         self.transform = transform
         self.excluded_emotions = list(excluded_emotions or [])
@@ -18,7 +18,6 @@ class FerDataset(Dataset):
 
         self.emotions = [e for e in EMOTIONS if e not in self.excluded_emotions]
         self._samples, self._labels, self.dominant = self._collect_samples()
-        np.random.seed(seed)
 
     def __getitem__(self, index):
         path = self.root / self._samples[index]

@@ -75,7 +75,7 @@ def show_image(path, detector, model, preprocess, device):
     elapsed_time = time.time() - start_time
 
     for x1, y1, x2, y2, emotion, probability in classified_boxes:
-        cv2.rectangle(frame, (x1, y1), (x2, y2), COLOR, 2)
+        cv2.rectangle(frame, (x1, y1), (x2, y2), COLOR, 5)
 
         label = f"{emotion} {probability:.3f}"
         cv2.putText(
@@ -83,11 +83,11 @@ def show_image(path, detector, model, preprocess, device):
             label,
             (x1, max(y1 - 10, 20)),
             cv2.FONT_HERSHEY_SIMPLEX,
-            0.9,
+            1.7,
             COLOR,
-            2
+            4
         )
-
+    '''
     cv2.putText(
         frame,
         f"{elapsed_time * 1000:.0f}ms",
@@ -96,7 +96,7 @@ def show_image(path, detector, model, preprocess, device):
         1,
         COLOR,
         2
-    )
+    )'''
 
     cv2.imshow("Image", frame)
     cv2.waitKey(0)
@@ -210,12 +210,12 @@ def run_webcam(detector, model, preprocess, device):
 
 
 if __name__ == "__main__":
-    device = "cpu"#"cuda" if torch.cuda.is_available() else "cpu"
+    device = "cuda" if torch.cuda.is_available() else "cpu"
     detector = MTCNN(keep_all=True, device=device)
 
-    model, model_transform = get_model("resnet50", 8, load_checkpoint=True, device=device)
+    model, model_transform = get_model("resnet18", 8, load_checkpoint=True, device=device)
 
     model.eval()
     transform = build_image_transform(size=112, channels=3, augment=False, mean=model_transform.mean, std=model_transform.std)
-    show_image("src/photo.jpg", detector, model, transform, device)
+    show_image("image.jpg", detector, model, transform, device)
     run_webcam(detector, model, transform, device)
