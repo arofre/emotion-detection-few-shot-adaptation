@@ -22,6 +22,7 @@ class FerDataset(Dataset):
     def __getitem__(self, index):
         path = self.root / self._samples[index]
         with Image.open(path) as img:
+            #Original comes as BGR
             img = img.convert("RGB")
         if self.transform:
             img = self.transform(img)
@@ -34,6 +35,7 @@ class FerDataset(Dataset):
         if not self.shots and not self.amplify:
             return np.arange(len(dominant))
 
+        # Used for oversampling and undersampling for few shot 
         parts = []
         for c, name in enumerate(EMOTIONS):
             members = np.flatnonzero(dominant == c)
@@ -50,11 +52,14 @@ class FerDataset(Dataset):
 
     def _collect_samples(self):
         data = pd.read_csv(self.root / "label.csv", names=["Image name", "Box"] + CLASSES)
+
+        #Filter out unknown or NF to prevent noise
         data = data[(data["NF"] <= 5) & (data["unknown"] <= 5)]
 
         votes = data[EMOTIONS].to_numpy(dtype=float)
         dominant = votes.argmax(axis=1)
 
+        #Filter out excluded emotion
         excluded_idx = [EMOTIONS.index(e) for e in self.excluded_emotions]
         kept_idx = [EMOTIONS.index(e) for e in self.emotions]
 

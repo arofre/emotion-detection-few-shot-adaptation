@@ -2,11 +2,6 @@ from torchvision import transforms as T
 
 
 def build_image_transform(size=224, channels=1, mean=None, std=None, augment=False, strong=False):
-    if channels not in (1, 3):
-        raise ValueError("channels must be 1 or 3")
-    if (mean is None) != (std is None):
-        raise ValueError("Provide both mean and std")
-
     steps = [
         T.Grayscale(num_output_channels=channels),
         T.Resize((size, size), antialias=True),

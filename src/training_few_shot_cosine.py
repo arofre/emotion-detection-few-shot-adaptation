@@ -44,6 +44,8 @@ def extract_features(model, loader, device):
     features, labels = [], []
 
     for images, y in loader:
+        #A bit messy but this gives the feature vector for a given image
+
         images = images.to(device)
 
         x = model.conv1(images)
@@ -170,7 +172,6 @@ def training_loop(model, optimizer, train_criterion, val_criterion, train_loader
 
         val_loss /= len(val_loader.dataset)
 
-
         print(
             f"Epoch {epoch + 1}/{epochs}, "
             f"Train Loss: {train_loss:.4f}, "
@@ -178,8 +179,9 @@ def training_loop(model, optimizer, train_criterion, val_criterion, train_loader
         )
 
 
-
-    torch.save({  #Since the same validaiton is used later, save latest instead of best model to avoid leaking
+    #Since training is done in stages, the last checkpoint is used instead of the best
+    #to avoid leaking information from the validation set
+    torch.save({ 
         "epoch": epoch + 1,
         "model_state_dict": model.state_dict(),
         "optimizer_state_dict": optimizer.state_dict(),

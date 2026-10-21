@@ -17,6 +17,8 @@ from evaluate import evaluation_report, evaluate_model
 device = "cuda" if cuda.is_available() else "cpu"
 print(device)
 
+#This file is not commented, see relevant comments in training_few_shot_cosine.py for hard to understand parts
+
 SEED = 0 
 AMPLIFY_REPS = 10 
 

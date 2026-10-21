@@ -59,6 +59,7 @@ def show_image(path, detector, model, preprocess, device):
     classified_boxes = []
 
     if face_images:
+        #The images are shown as rgb but classified as grayscale
         emotions, emotion_probabilities = classify_face(
             face_images, model, preprocess, device
         )
@@ -73,7 +74,8 @@ def show_image(path, detector, model, preprocess, device):
         ]
 
     elapsed_time = time.time() - start_time
-
+    print(elapsed_time)
+    '''
     for x1, y1, x2, y2, emotion, probability in classified_boxes:
         cv2.rectangle(frame, (x1, y1), (x2, y2), COLOR, 5)
 
@@ -87,26 +89,18 @@ def show_image(path, detector, model, preprocess, device):
             COLOR,
             4
         )
-    '''
-    cv2.putText(
-        frame,
-        f"{elapsed_time * 1000:.0f}ms",
-        (10, 30),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        1,
-        COLOR,
-        2
-    )'''
+
 
     cv2.imshow("Image", frame)
     cv2.waitKey(0)
     cv2.destroyAllWindows()
+    '''
 
 
 
 
 def run_webcam(detector, model, preprocess, device):
-    smoothing_factor = 0.5 #mellan 0 och 1
+    smoothing_factor = 0.5 #between 0 och 1
     smooth = []   
     history = [] 
 
@@ -169,6 +163,7 @@ def run_webcam(detector, model, preprocess, device):
                 state["latest_time"] = latest_time
                 state["boxes"] = classified_boxes
 
+    #together with worker function makes sure that webcam feed is not blocked by classification and detection
     thread = threading.Thread(target=worker, daemon=True)
     thread.start() 
 
@@ -183,6 +178,7 @@ def run_webcam(detector, model, preprocess, device):
             latest_time = state["latest_time"]
 
         if boxes is not None:
+            #Smooth and history is used to prevent jittering of bounding boxes and emotions
             if len(boxes) != len(smooth):
                 smooth = [list(b[:4]) for b in boxes]
                 history = [deque(maxlen=30) for _ in boxes]
@@ -217,5 +213,5 @@ if __name__ == "__main__":
 
     model.eval()
     transform = build_image_transform(size=112, channels=3, augment=False, mean=model_transform.mean, std=model_transform.std)
-    show_image("image.jpg", detector, model, transform, device)
+    #show_image("image.jpg", detector, model, transform, device) If showing image, put image in same folder as running from
     run_webcam(detector, model, transform, device)

@@ -82,6 +82,7 @@ def evaluate_model(model, dataloader, device="cpu", loss_fn=None, target_map=Non
         print(f"Error during evaluation: {e}")
         raise
     finally:
+        # this ensures that model is back to training state to prevent some errors
         model.train(was_training)
 
     return {
